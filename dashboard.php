@@ -419,12 +419,13 @@ a:hover{text-decoration:underline;}
     <a href="dashboard.php">Dashboard</a>
     <?php if($role=='admin'): ?>
         <a href="#departments">Departments</a>
-        <a href="#sem_div">Semesters & Divisions</a>
+        <a href="#semester">Semesters & Divisions</a>
         <a href="#classrooms">Classrooms</a>
-        <a href="#students">Students</a>
         <a href="#faculty">Faculty</a>
+        <a href="#subjects">Subjects</a>
+        <a href="#constraints">Constraints</a>
+        <a href="#timetable">Time Table</a>
     <?php endif; ?>
-    <a href="#timetable">Timetable</a>
     <a href="logout.php" style="float:right;">Logout</a>
     <span class="user-info">👤 <?php echo htmlspecialchars($username); ?> (<?php echo htmlspecialchars($role); ?>)</span>
 </nav>
@@ -1142,38 +1143,6 @@ if(isset($_GET['delete_div_id'])){
 
     <hr>
 
-    <!-- ADD SUBJECT -->
-    <div class="add-subject">
-        <h3>Add New Subject</h3>
-        <form method="post">
-            <input type="text" name="subject_name" placeholder="Subject Name" required>
-            <input type="text" name="subject_code" placeholder="Subject Code" required>
-            <input type="number" name="credits" placeholder="Credits" value="3">
-
-            <select name="dept_id" required>
-                <option value="">Select Department</option>
-                <?php
-                $depts = $conn->query("SELECT * FROM departments ORDER BY name ASC");
-                while($d=$depts->fetch_assoc()){
-                    echo "<option value='".$d['id']."'>".$d['name']."</option>";
-                }
-                ?>
-            </select>
-
-            <select name="semester_id" required>
-                <option value="">Select Semester</option>
-                <?php
-                $sems = $conn->query("SELECT s.*, d.name AS dept_name FROM semesters s JOIN departments d ON s.dept_id=d.id ORDER BY d.name,s.id");
-                while($s=$sems->fetch_assoc()){
-                    echo "<option value='".$s['id']."'>".$s['dept_name']." - ".$s['name']."</option>";
-                }
-                ?>
-            </select>
-
-            <button type="submit" name="add_subject">Add Subject</button>
-        </form>
-    </div>
-
 </section>
 <?php endif; ?>
 
@@ -1681,6 +1650,101 @@ if(isset($_POST['add_subject'])){
             echo "</tr>";
         }
         echo "</tbody></table>";
+    }
+    ?>
+</section>
+<?php endif; ?>
+<?php if($role=='faculty'): ?>
+<section id="faculty-dashboard" class="content-section">
+    <h1>Faculty Dashboard</h1>
+
+    <?php
+    // Get faculty details
+    $res = $conn->prepare("SELECT * FROM faculties WHERE user_id=(SELECT id FROM users WHERE username=?)");
+    $res->bind_param("s",$username);
+    $res->execute();
+    $faculty = $res->get_result()->fetch_assoc();
+
+    if(!$faculty){
+        echo "<p style='color:red'>Faculty record not found!</p>";
+    } else {
+        $faculty_id = $faculty['id'];
+        echo "<h3>Welcome, ".htmlspecialchars($faculty['name'])."</h3>";
+        echo "<p>Email: ".htmlspecialchars($faculty['email'])."</p>";
+        echo "<p>Phone: ".htmlspecialchars($faculty['phone'])."</p>";
+
+        // Get subjects assigned to this faculty
+        $subjects = $conn->query("SELECT s.subject_name, s.subject_code, d.name AS dept_name 
+                                  FROM faculty_subjects fs 
+                                  JOIN subjects s ON fs.subject_id=s.id
+                                  JOIN departments d ON s.dept_id=d.id
+                                  WHERE fs.faculty_id=$faculty_id
+                                  ORDER BY d.name, s.subject_name");
+
+        echo "<div class='content-section'>";
+        echo "<h3>Assigned Subjects</h3>";
+        if($subjects->num_rows>0){
+            echo "<table>
+                    <thead><tr><th>Dept</th><th>Subject Code</th><th>Subject Name</th></tr></thead><tbody>";
+            while($sub=$subjects->fetch_assoc()){
+                echo "<tr>
+                        <td>".htmlspecialchars($sub['dept_name'])."</td>
+                        <td>".htmlspecialchars($sub['subject_code'])."</td>
+                        <td>".htmlspecialchars($sub['subject_name'])."</td>
+                      </tr>";
+            }
+            echo "</tbody></table>";
+        } else {
+            echo "<p>No subjects assigned yet.</p>";
+        }
+        echo "</div>";
+
+        // Fetch constraints
+        $cons = $conn->query("SELECT num_weekdays, num_daily_slots FROM constraints LIMIT 1")->fetch_assoc();
+        $num_slots = $cons['num_daily_slots'];
+        $days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+        // Fetch timetable
+        $timetable = $conn->query("SELECT t.day, t.slot, s.subject_name, s.subject_code, c.room_number, d.name AS division_name
+                                   FROM timetable t
+                                   JOIN subjects s ON t.subject_id=s.id
+                                   JOIN classrooms c ON t.classroom_id=c.id
+                                   JOIN divisions d ON t.division_id=d.id
+                                   WHERE t.faculty_id=$faculty_id");
+
+        // Create array for quick lookup
+        $tt_arr = [];
+        while($t=$timetable->fetch_assoc()){
+            $tt_arr[$t['slot']][$t['day']] = $t;
+        }
+
+        // Display matrix timetable
+        echo "<div class='content-section'>";
+        echo "<h3>Your Timetable</h3>";
+        echo "<table border='1' cellpadding='8' cellspacing='0' style='text-align:center;'>";
+        echo "<thead><tr><th>Slot</th>";
+        foreach($days as $day) echo "<th>$day</th>";
+        echo "</tr></thead><tbody>";
+
+        for($slot=1; $slot<=$num_slots; $slot++){
+            echo "<tr>";
+            echo "<td><strong>$slot</strong></td>";
+            foreach($days as $day){
+                if(isset($tt_arr[$slot][$day])){
+                    $cell = $tt_arr[$slot][$day];
+                    echo "<td>".htmlspecialchars($cell['subject_code'])."<br>"
+                               .htmlspecialchars($cell['subject_name'])."<br>"
+                               .htmlspecialchars($cell['division_name'])."<br>"
+                               .htmlspecialchars($cell['room_number'])."</td>";
+                } else {
+                    echo "<td>-</td>";
+                }
+            }
+            echo "</tr>";
+        }
+
+        echo "</tbody></table>";
+        echo "</div>";
     }
     ?>
 </section>
